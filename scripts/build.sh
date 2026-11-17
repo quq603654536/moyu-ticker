@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-APP="$ROOT/dist/盯盘.app"
+APP="$ROOT/dist/摸鱼盯盘.app"
 BUILD="$ROOT/.build/native"
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 mkdir -p "$BUILD" "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -47,5 +47,5 @@ fi
 cp "$BUILD/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$ROOT/dist/盯盘-macOS.zip"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$ROOT/dist/摸鱼盯盘-macOS.zip"
 echo "Built: $APP"
