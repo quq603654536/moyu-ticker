@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "TickerBar",
+    name: "MoyuTicker",
     platforms: [.macOS(.v13)],
     products: [.executable(name: "TickerBar", targets: ["TickerBar"])],
     targets: [
