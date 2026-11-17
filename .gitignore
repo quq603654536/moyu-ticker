@@ -1,0 +1,16 @@
+# Build output and application packages
+.build/
+.swiftpm/
+dist/
+
+# macOS and per-user Xcode state
+.DS_Store
+*.xcuserstate
+xcuserdata/
+
+# Local configuration and diagnostics
+.env
+.env.*
+!.env.example
+*.log
+Logs/
