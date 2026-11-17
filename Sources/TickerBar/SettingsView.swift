@@ -50,7 +50,7 @@ struct SettingsView: View {
                         let status = SMAppService.mainApp.status
                         loginEnabled = status == .enabled
                         needsApproval = status == .requiresApproval
-                        message = needsApproval ? "请在系统设置的「登录项」中允许盯盘启动" : nil
+                        message = needsApproval ? "请在系统设置的「登录项」中允许摸鱼盯盘启动" : nil
                     } catch { loginEnabled = SMAppService.mainApp.status == .enabled; message = "设置失败：" + error.localizedDescription }
                 })).toggleStyle(.switch).controlSize(.small)
                 if let message = message { Text(message).font(.system(size: 10)).foregroundColor(.orange) }
@@ -59,7 +59,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Button("接口日志与失败率…") { showDiagnostics = true }
                     .font(.system(size: 12)).foregroundColor(Palette.purple)
-                Text("盯盘 TickerBar 1.0").font(.system(size: 12, weight: .medium))
+                Text("摸鱼盯盘 · Moyu Ticker 1.0").font(.system(size: 12, weight: .medium))
                 Text("行情：腾讯财经 · 市场广度：东方财富\n分时约每分钟更新，行情以接口返回时间为准。").font(.system(size: 10)).foregroundColor(Palette.muted).lineSpacing(4)
                 HStack(spacing: 16) {
                     Link("腾讯财经", destination: URL(string: "https://gu.qq.com/")!)

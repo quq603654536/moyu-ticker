@@ -163,7 +163,7 @@ import MarketCore
         menuQuoteView?.frame = button.bounds
         menuQuoteView?.layoutSubtreeIfNeeded()
         menuQuoteView?.display(symbol: symbol, title: NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color]))
-        button.setAccessibilityLabel("盯盘行情 " + text)
+        button.setAccessibilityLabel("摸鱼盯盘行情 " + text)
         button.toolTip = nil
     }
     @objc private func statusClicked() {
@@ -176,7 +176,7 @@ import MarketCore
             menu.addItem(.separator())
             menu.addItem(withTitle: "偏好设置…", action: #selector(settings), keyEquivalent: ",")
             menu.addItem(.separator())
-            menu.addItem(withTitle: "退出盯盘", action: #selector(quit), keyEquivalent: "q")
+            menu.addItem(withTitle: "退出摸鱼盯盘", action: #selector(quit), keyEquivalent: "q")
             for item in menu.items { item.target = self }
             statusItem.menu = menu
             statusItem.button?.performClick(nil)
@@ -232,7 +232,7 @@ import MarketCore
         dismissPreview()
         if window == nil {
             let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            w.title = "盯盘 · A 股行情"
+            w.title = "摸鱼盯盘 · A 股行情"
             w.isReleasedWhenClosed = false
             w.delegate = self
             w.level = store.pinned ? .floating : .normal

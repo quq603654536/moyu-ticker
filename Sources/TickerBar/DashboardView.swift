@@ -29,7 +29,7 @@ struct DashboardView: View {
 
     private var titlebar: some View {
         HStack(spacing: 8) {
-            Text("盯盘").font(.system(size: 14, weight: .semibold))
+            Text("摸鱼盯盘").font(.system(size: 14, weight: .semibold))
             Text("/  A 股行情").font(.system(size: 11)).foregroundColor(Palette.muted)
             Spacer()
             Circle().fill(store.isStale ? Color.orange : Palette.green).frame(width: 5, height: 5)
@@ -56,7 +56,7 @@ struct DashboardView: View {
             breadthSummary
             Spacer(minLength: 14)
             sideButton("gearshape", label: "设置", active: store.showSettings) { store.showSettings = true }
-            sideButton("power", label: "退出盯盘", active: false) { NSApp.terminate(nil) }
+            sideButton("power", label: "退出摸鱼盯盘", active: false) { NSApp.terminate(nil) }
             Text("轻巧 · 专注").font(.system(size: 8)).foregroundColor(Palette.muted.opacity(0.7)).padding(.vertical, 15)
         }.frame(width: 76).background(Palette.canvas)
             .overlay(alignment: .trailing) { Rectangle().fill(Palette.line).frame(width: 1) }
