@@ -47,6 +47,7 @@ struct TrendChart: View {
     let series: MinuteSeries?
     let quote: Quote?
     var detailed = false
+    var lineColor: Color? = nil
     @State private var hoverX: CGFloat?
 
     var validSeries: MinuteSeries? { series.flatMap { $0.matches(quote) ? $0 : nil } }
@@ -84,7 +85,7 @@ struct TrendChart: View {
                             path.addLine(to: .init(x: x(last), y: height))
                             path.addLine(to: .init(x: x(first), y: height)); path.closeSubpath()
                         }
-                    }.fill(LinearGradient(colors: [Palette.movement(quote?.percent).opacity(detailed ? 0.10 : 0.04), .clear], startPoint: .top, endPoint: .bottom))
+                    }.fill(LinearGradient(colors: [(lineColor ?? Palette.movement(quote?.percent)).opacity(detailed ? 0.10 : 0.04), .clear], startPoint: .top, endPoint: .bottom))
                     Path { path in
                         var started = false
                         for point in points {
@@ -98,7 +99,7 @@ struct TrendChart: View {
                             let pos = CGPoint(x: x(point), y: y(point.price))
                             if i == 0 { path.move(to: pos) } else { path.addLine(to: pos) }
                         }
-                    }.stroke(Palette.movement(quote?.percent), style: StrokeStyle(lineWidth: detailed ? 1.6 : 1.15, lineJoin: .round))
+                    }.stroke(lineColor ?? Palette.movement(quote?.percent), style: StrokeStyle(lineWidth: detailed ? 1.6 : 1.15, lineJoin: .round))
                     if detailed, let hx = hoverX, let point = points.min(by: { abs(x($0) - hx) < abs(x($1) - hx) }) {
                         Path { p in p.move(to: .init(x: x(point), y: 0)); p.addLine(to: .init(x: x(point), y: height)) }
                             .stroke(Palette.purple.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))

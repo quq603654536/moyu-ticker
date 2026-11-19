@@ -19,8 +19,10 @@ struct WatchItem: Codable, Identifiable {
 enum SortField: String, CaseIterable { case manual = "默认", price = "价格", change = "当日涨跌" }
 
 @MainActor final class MarketStore: ObservableObject {
-    static let indices = ["sh000001", "sz399001", "sz399006", "sh000688", "sh000300", "sh000852"]
-    static let indexNames = ["上证指数", "深证成指", "创业板指", "科创50", "沪深300", "中证1000"]
+    static let leadingSymbol = LeadingIndex.symbol
+    static let indices = ["sh000001", leadingSymbol, "sz399001", "sz399006", "sh000688", "sh000852"]
+    static let indexNames = ["上证指数", LeadingIndex.name, "深证成指", "创业板指", "科创50", "中证1000"]
+    static let indexShortNames = ["上证", LeadingIndex.name, "深证", "创业板", "科创50", "中证1000"]
     static let defaults: [WatchItem] = [
         .init(symbol: "sh588010", name: "科创新材料ETF博时", group: .value, holding: true),
         .init(symbol: "sh603156", name: "养元饮品", group: .value),
@@ -39,6 +41,8 @@ enum SortField: String, CaseIterable { case manual = "默认", price = "价格",
     @Published var minutes: [String: MinuteSeries] = [:]
     @Published var breadth: MarketBreadth?
     @Published var breadthError = false
+    @Published var leading: LeadingIndexSnapshot?
+    @Published var leadingError = false
     @Published var group: StockGroup = .value
     @Published var sort: SortField = .manual
     @Published var ascending = false
@@ -72,6 +76,8 @@ enum SortField: String, CaseIterable { case manual = "默认", price = "价格",
     private var trendInFlight = Set<String>()
     private var started = false
     private var breadthAttempt: Date?
+    private var leadingAttempt: Date?
+    private var leadingInFlight = false
     private var candleAttempt: [String: Date] = [:]
 
     init(preferences defaults: UserDefaults = .standard, service: MarketService = MarketService()) {
@@ -82,17 +88,25 @@ enum SortField: String, CaseIterable { case manual = "默认", price = "价格",
         let savedMenuSymbol = defaults.string(forKey: "menuSymbol") ?? "sh000001"
         let savedSymbols = defaults.stringArray(forKey: "menuSymbols") ?? [savedMenuSymbol]
         var seen = Set<String>()
-        let validSymbols = savedSymbols.map { $0 == "sh000905" ? "sh000852" : $0 }.filter {
-            $0.range(of: #"^(sh|sz|bj)\d{6}$"#, options: .regularExpression) != nil && seen.insert($0).inserted
+        let validSymbols = savedSymbols.map { $0 == "sh000905" ? "sh000852" : $0 == "sh000300" ? Self.leadingSymbol : $0 }.filter {
+            ($0 == Self.leadingSymbol || $0.range(of: #"^(sh|sz|bj)\d{6}$"#, options: .regularExpression) != nil) && seen.insert($0).inserted
         }
         menuSymbols = validSymbols.isEmpty ? [Self.indices[0]] : validSymbols
         menuShowPrice = defaults.object(forKey: "menuShowPrice") as? Bool ?? true
         hoverTransparent = defaults.bool(forKey: "hoverTransparent")
+        // Old caches contain STAR Market VWAP / volume calculated as lots.
+        // Invalidate market data once; keep watchlists and user preferences.
+        if defaults.integer(forKey: "marketDataSchema") != 2 {
+            for key in ["quotes", "minutes", "candles", "lastSuccess"] { defaults.removeObject(forKey: key) }
+            defaults.set(2, forKey: "marketDataSchema")
+        }
         quotes = Self.read([String: Quote].self, "quotes", defaults) ?? [:]
         minutes = Self.read([String: MinuteSeries].self, "minutes", defaults) ?? [:]
         breadth = Self.read(MarketBreadth.self, "breadth", defaults)
         lastSuccess = defaults.object(forKey: "lastSuccess") as? Date
         candleSeries = Self.read([String: CandleSeries].self, "candles", defaults) ?? [:]
+        leading = Self.read(LeadingIndexSnapshot.self, "leadingIndex", defaults)
+        if let leading = leading { quotes[Self.leadingSymbol] = leading.quote; minutes[Self.leadingSymbol] = leading.series }
     }
 
     private static func read<T: Decodable>(_ type: T.Type, _ key: String, _ defaults: UserDefaults) -> T? {
@@ -102,7 +116,7 @@ enum SortField: String, CaseIterable { case manual = "默认", price = "价格",
         if let data = try? JSONEncoder().encode(value) { preferences.set(data, forKey: key) }
     }
     func setMenuSymbol(_ symbol: String, enabled: Bool) {
-        guard symbol.range(of: #"^(sh|sz|bj)\d{6}$"#, options: .regularExpression) != nil else { return }
+        guard symbol == Self.leadingSymbol || symbol.range(of: #"^(sh|sz|bj)\d{6}$"#, options: .regularExpression) != nil else { return }
         if enabled {
             if !menuSymbols.contains(symbol) { menuSymbols.append(symbol) }
         } else if menuSymbols.count > 1 {
@@ -169,7 +183,7 @@ enum SortField: String, CaseIterable { case manual = "默认", price = "价格",
         guard !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
-        let symbols = Array(Set(Self.indices + items.map(\.symbol) + menuSymbols))
+        let symbols = Array(Set(Self.indices + items.map(\.symbol) + menuSymbols)).filter { $0 != Self.leadingSymbol }
         do {
             let result = try await service.quotes(symbols)
             for quote in result { quotes[quote.symbol] = quote }
@@ -183,6 +197,7 @@ enum SortField: String, CaseIterable { case manual = "默认", price = "价格",
             self.error = "行情更新失败，已保留上次数据 · " + error.localizedDescription
         }
         await withTaskGroup(of: Void.self) { tasks in
+            tasks.addTask { await self.fetchLeading() }
             if breadthAttempt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true {
                 tasks.addTask { await self.fetchBreadth() }
             }
@@ -198,6 +213,36 @@ enum SortField: String, CaseIterable { case manual = "默认", price = "价格",
         }
         save(minutes, "minutes")
     }
+    func fetchLeading(force: Bool = false) async {
+        guard !leadingInFlight else { return }
+        guard force || leadingAttempt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
+        leadingAttempt = Date()
+        leadingInFlight = true
+        defer { leadingInFlight = false }
+        do {
+            let result = try await service.leadingIndex()
+            leading = result
+            quotes[Self.leadingSymbol] = result.quote
+            minutes[Self.leadingSymbol] = result.series
+            leadingError = false
+            trendErrors.remove(Self.leadingSymbol)
+            save(result, "leadingIndex")
+        } catch {
+            leadingError = true
+            trendErrors.insert(Self.leadingSymbol)
+        }
+    }
+    func quoteIsStale(_ symbol: String) -> Bool {
+        if symbol == Self.leadingSymbol {
+            return leadingError || leading.map { Date().timeIntervalSince($0.fetchedAt) > 120 } ?? true
+        }
+        return isStale
+    }
+    var leadingStatus: String {
+        if leadingError { return leading == nil ? "黄线暂不可用" : "黄线更新失败 · 缓存数据" }
+        if let leading = leading, Date().timeIntervalSince(leading.fetchedAt) > 120 { return "东财黄线 · 缓存数据（待更新）" }
+        return leading?.delayed == true ? "东财延时黄线 · 约每分钟更新" : "东财黄线 · 约每分钟更新"
+    }
     func fetchBreadth() async {
         breadthAttempt = Date()
         do {
@@ -208,6 +253,7 @@ enum SortField: String, CaseIterable { case manual = "默认", price = "价格",
         } catch { breadthError = true }
     }
     func fetchMinutes(_ symbol: String, force: Bool = false) async {
+        if symbol == Self.leadingSymbol { await fetchLeading(force: force); return }
         guard !trendInFlight.contains(symbol) else { return }
         guard force || minuteUpdated[symbol].map({ Date().timeIntervalSince($0) > 60 }) ?? true else { return }
         trendInFlight.insert(symbol)
@@ -233,6 +279,7 @@ enum SortField: String, CaseIterable { case manual = "默认", price = "价格",
         "\(symbol)|\(period.rawValue)|\(adjustment.rawValue)"
     }
     func fetchCandles(_ symbol: String, period: CandlePeriod, adjustment: PriceAdjustment, force: Bool = false) async {
+        guard symbol != Self.leadingSymbol else { return }
         let key = Self.candleKey(symbol, period, adjustment)
         guard !candleLoading.contains(key) else { return }
         guard force || candleSeries[key].map({ Date().timeIntervalSince($0.fetchedAt) >= 60 }) ?? true else { return }

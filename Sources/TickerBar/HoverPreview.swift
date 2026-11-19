@@ -52,7 +52,8 @@ struct HoverPreview: View {
                 .frame(width: 58, alignment: .trailing)
                 .foregroundColor(Palette.movement(quote?.percent))
         }.font(.system(size: 10)).frame(height: height)
-            .contentShape(Rectangle()).help(name)
+            .contentShape(Rectangle()).help(symbol == MarketStore.leadingSymbol ? store.leadingStatus : name)
+            .opacity(symbol == MarketStore.leadingSymbol && store.quoteIsStale(symbol) ? 0.6 : 1)
             .onTapGesture {
                 if let selectStock = selectStock { selectStock(symbol) } else { expand() }
             }

@@ -101,11 +101,11 @@ struct DashboardView: View {
     private var indexStrip: some View {
         HStack(spacing: 12) {
             ForEach(Array(MarketStore.indices.enumerated()), id: \.element) { i, symbol in
-                IndexCard(name: MarketStore.indexNames[i], quote: store.quotes[symbol], active: store.selected == symbol)
+                IndexCard(name: MarketStore.indexNames[i], quote: store.quotes[symbol], active: store.selected == symbol, stale: symbol == MarketStore.leadingSymbol && store.quoteIsStale(symbol))
                     .onTapGesture { store.openDetails(symbol) }
                     .contextMenu { Button(store.menuSymbols.contains(symbol) ? "从菜单栏移除" : "加入菜单栏轮播") { store.toggleMenuSymbol(symbol) }
                         .disabled(store.menuSymbols == [symbol]) }
-                    .help("点击查看分时详情；右键可加入菜单栏轮播")
+                    .help(symbol == MarketStore.leadingSymbol ? store.leadingStatus : "点击查看分时详情；右键可加入菜单栏轮播")
             }
         }.padding(.horizontal, 20).padding(.bottom, 16)
     }
@@ -188,7 +188,7 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 24) {
                 indexStrip.padding(.horizontal, -20)
                 Text("市场概览").font(.system(size: 22, weight: .semibold))
-                Text("六大指数 · 点击卡片查看当日分时").font(.system(size: 12)).foregroundColor(Palette.muted)
+                Text("五大指数与上涨领先 · 点击查看当日分时").font(.system(size: 12)).foregroundColor(Palette.muted)
                 LazyVGrid(columns: [.init(.flexible()), .init(.flexible())], spacing: 16) {
                     ForEach(Array(MarketStore.indices.enumerated()), id: \.element) { i, symbol in
                         VStack(alignment: .leading, spacing: 14) {
@@ -197,7 +197,7 @@ struct DashboardView: View {
                                 Spacer()
                                 Text(MarketFormat.percent(store.quotes[symbol]?.percent)).foregroundColor(Palette.movement(store.quotes[symbol]?.percent))
                             }
-                            TrendChart(series: store.minutes[symbol], quote: store.quotes[symbol], detailed: true).frame(height: 120)
+                            TrendChart(series: store.minutes[symbol], quote: store.quotes[symbol], detailed: true, lineColor: symbol == MarketStore.leadingSymbol ? .orange : nil).frame(height: 120)
                             HStack { Text("09:30"); Spacer(); Text("11:30 / 13:00"); Spacer(); Text("15:00") }.font(.system(size: 9)).foregroundColor(Palette.muted)
                         }.padding(18).background(Palette.canvas).cornerRadius(12)
                             .task { await store.fetchMinutes(symbol) }
@@ -234,13 +234,14 @@ struct IndexCard: View {
     let name: String
     let quote: Quote?
     let active: Bool
+    var stale = false
     var body: some View {
         let color = Palette.movement(quote?.percent)
         VStack(alignment: .leading, spacing: 7) {
             HStack {
                 Text(name).font(.system(size: 12, weight: .medium))
                 Spacer(minLength: 0)
-                Image(systemName: (quote?.percent ?? 0) >= 0 ? "arrow.up.right" : "arrow.down.right").font(.system(size: 9, weight: .semibold)).opacity(0.55)
+                Image(systemName: stale ? "clock" : (quote?.percent ?? 0) >= 0 ? "arrow.up.right" : "arrow.down.right").font(.system(size: 9, weight: .semibold)).opacity(0.55)
             }
             Text(quote?.priceText ?? "—").font(.system(size: 25, weight: .semibold, design: .rounded)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
             HStack(spacing: 5) {
@@ -251,7 +252,7 @@ struct IndexCard: View {
         }.foregroundColor(color).padding(.horizontal, 14).padding(.vertical, 13)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(LinearGradient(colors: [color.opacity(0.12), color.opacity(0.05)], startPoint: .topLeading, endPoint: .bottomTrailing))
-            .cornerRadius(12).overlay { RoundedRectangle(cornerRadius: 12).stroke(active ? Palette.purple.opacity(0.55) : color.opacity(0.04), lineWidth: 1) }
+            .cornerRadius(12).overlay { RoundedRectangle(cornerRadius: 12).stroke(active ? Palette.purple.opacity(0.55) : color.opacity(0.04), lineWidth: 1) }.opacity(stale ? 0.65 : 1)
     }
 }
 

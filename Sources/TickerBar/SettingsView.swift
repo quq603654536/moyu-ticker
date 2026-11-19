@@ -59,8 +59,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Button("接口日志与失败率…") { showDiagnostics = true }
                     .font(.system(size: 12)).foregroundColor(Palette.purple)
-                Text("摸鱼盯盘 · Moyu Ticker 1.0").font(.system(size: 12, weight: .medium))
-                Text("行情：腾讯财经 · 市场广度：东方财富\n分时约每分钟更新，行情以接口返回时间为准。").font(.system(size: 10)).foregroundColor(Palette.muted).lineSpacing(4)
+                Text("摸鱼盯盘 · Moyu Ticker 1.0.1").font(.system(size: 12, weight: .medium))
+                Text("行情：腾讯财经 · 领先指标及市场广度：东方财富\n分时约每分钟更新，行情以接口返回时间为准。").font(.system(size: 10)).foregroundColor(Palette.muted).lineSpacing(4)
                 HStack(spacing: 16) {
                     Link("腾讯财经", destination: URL(string: "https://gu.qq.com/")!)
                     Link("东方财富", destination: URL(string: "https://quote.eastmoney.com/")!)

@@ -134,16 +134,17 @@ import MarketCore
         let symbol = menuRotation.symbol
         let quote = store.quotes[symbol]
         let name = store.menuName(symbol)
+        let stale = store.quoteIsStale(symbol)
         let shortName: String
         if let index = MarketStore.indices.firstIndex(of: symbol) {
-            shortName = ["上证", "深证", "创业板", "科创50", "沪深300", "中证1000"][index]
+            shortName = MarketStore.indexShortNames[index]
         } else { shortName = String(name.prefix(6)) }
         let text: String
         if let quote = quote {
-            text = "\(shortName) \(store.menuShowPrice ? quote.priceText + " " : "")\(MarketFormat.percent(quote.percent))\(store.isStale ? " ·" : "")"
+            text = "\(shortName) \(store.menuShowPrice ? quote.priceText + " " : "")\(MarketFormat.percent(quote.percent))\(stale ? " ·" : "")"
         } else { text = "\(shortName) —" }
         let color: NSColor
-        if let q = quote, !store.isStale {
+        if let q = quote, !stale {
             color = q.percent > 0 ? NSColor(calibratedRed: 0.92, green: 0.28, blue: 0.3, alpha: 1) : q.percent < 0 ? NSColor(calibratedRed: 0.13, green: 0.68, blue: 0.33, alpha: 1) : .labelColor
         } else { color = .secondaryLabelColor }
         // Reserve the widest selected quote so other menu-bar items stay still.
@@ -152,9 +153,9 @@ import MarketCore
             let candidateQuote = store.quotes[candidate]
             let candidateName: String
             if let i = MarketStore.indices.firstIndex(of: candidate) {
-                candidateName = ["上证", "深证", "创业板", "科创50", "沪深300", "中证1000"][i]
+                candidateName = MarketStore.indexShortNames[i]
             } else { candidateName = String(store.menuName(candidate).prefix(6)) }
-            let title = candidateQuote.map { "\(candidateName) \(store.menuShowPrice ? $0.priceText + " " : "")\(MarketFormat.percent($0.percent))\(store.isStale ? " ·" : "")" } ?? "\(candidateName) —"
+            let title = candidateQuote.map { "\(candidateName) \(store.menuShowPrice ? $0.priceText + " " : "")\(MarketFormat.percent($0.percent))\(store.quoteIsStale(candidate) ? " ·" : "")" } ?? "\(candidateName) —"
             return NSAttributedString(string: title, attributes: [.font: font]).size().width
         }.max() ?? 0
         statusItem.length = ceil(width) + 38

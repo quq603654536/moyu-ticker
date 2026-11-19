@@ -13,6 +13,7 @@ struct StockDetailPage: View {
     @ObservedObject var store: MarketStore
     let symbol: String
     @State private var highlighted: CandleBar?
+    private var isLeading: Bool { symbol == MarketStore.leadingSymbol }
     private var quote: Quote? { store.quotes[symbol] }
     private var adjustment: PriceAdjustment { store.effectiveAdjustment(for: symbol) }
     private var key: String { MarketStore.candleKey(symbol, store.detailPeriod.candlePeriod ?? .day, adjustment) }
@@ -24,7 +25,7 @@ struct StockDetailPage: View {
             navigation
             quoteSummary.padding(.vertical, 18)
             controls
-            if store.detailPeriod == .minute { minuteChart }
+            if store.detailPeriod == .minute || isLeading { minuteChart }
             else { candleChart }
         }.padding(.horizontal, 22).padding(.bottom, 16)
             .task(id: request) { highlighted = nil; await load() }
@@ -36,8 +37,8 @@ struct StockDetailPage: View {
             Button { store.selected = nil } label: { Label("返回自选", systemImage: "chevron.left").font(.system(size: 12, weight: .medium)) }
                 .buttonStyle(.plain).foregroundColor(Palette.purple)
             Rectangle().fill(Palette.line).frame(width: 1, height: 16)
-            Text(quote?.name ?? store.items.first { $0.symbol == symbol }?.name ?? symbol).font(.system(size: 19, weight: .semibold))
-            Text(String(symbol.dropFirst(2))).font(.system(size: 12, design: .monospaced)).foregroundColor(Palette.muted)
+            Text(store.menuName(symbol)).font(.system(size: 19, weight: .semibold))
+            Text(isLeading ? "上证领先" : String(symbol.dropFirst(2))).font(.system(size: 12, design: .monospaced)).foregroundColor(Palette.muted)
             Spacer()
             Button { store.toggleMenuSymbol(symbol) } label: {
                 Label(store.menuSymbols.contains(symbol) ? "从菜单栏移除" : "加入菜单栏轮播", systemImage: "menubar.rectangle").font(.system(size: 11))
@@ -58,6 +59,14 @@ struct StockDetailPage: View {
                 Text(quote.map { "行情时间 " + Self.formatTimestamp($0.timestamp) } ?? "行情获取中…")
                     .font(.system(size: 10)).foregroundColor(Palette.muted)
             }.frame(width: 290, alignment: .leading)
+            if isLeading {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(LeadingIndex.name + " · 上证领先指标").font(.system(size: 15, weight: .medium)).foregroundColor(.orange)
+                    Text("展示东财上证分时图中的黄线数据，用于观察不按市值加权的市场走势。").font(.system(size: 12))
+                    Text("涨跌以东财上证分时的昨收基准计算；仅提供分时，不提供独立 K 线或成交量。").font(.system(size: 11)).foregroundColor(Palette.muted)
+                    Text(store.leadingStatus).font(.system(size: 11)).foregroundColor(store.leadingError ? .orange : Palette.muted)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            } else {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), alignment: .leading, spacing: 16) {
                 metric("今开", price(quote?.open)); metric("昨收", price(quote?.previousClose))
                 metric("最高", price(quote?.high)); metric("最低", price(quote?.low))
@@ -66,12 +75,13 @@ struct StockDetailPage: View {
                 metric("市盈率", quote?.pe.map { String(format: "%.2f", $0) } ?? "—")
                 metric("市场状态", store.sessionText)
             }
+            }
         }
     }
 
     private var controls: some View {
         HStack(spacing: 8) {
-            ForEach(DetailPeriod.allCases) { period in
+            ForEach(isLeading ? [DetailPeriod.minute] : DetailPeriod.allCases) { period in
                 Button { store.detailPeriod = period } label: {
                     Text(period.rawValue).font(.system(size: 13, weight: .medium))
                         .foregroundColor(store.detailPeriod == period ? Palette.purple : Palette.muted)
@@ -80,7 +90,7 @@ struct StockDetailPage: View {
                 }.buttonStyle(.plain)
             }
             Spacer()
-            if store.detailPeriod != .minute {
+            if store.detailPeriod != .minute && !isLeading {
                 Picker("显示数量", selection: $store.candleCount) {
                     ForEach([60, 120, 250], id: \.self) { Text("\($0) 根").tag($0) }
                 }.labelsHidden().frame(width: 100)
@@ -100,12 +110,12 @@ struct StockDetailPage: View {
         VStack(spacing: 14) {
             HStack(spacing: 16) {
                 Text("当日分时").foregroundColor(Palette.ink)
-                Text("● 价格").foregroundColor(Palette.movement(quote?.percent))
-                if quote?.kind != "ZS" { Text("● 均价").foregroundColor(.orange) }
+                Text(isLeading ? "● " + LeadingIndex.name : "● 价格").foregroundColor(isLeading ? .orange : Palette.movement(quote?.percent))
+                if !isLeading && quote?.kind != "ZS" { Text("● 均价").foregroundColor(.orange) }
                 Spacer()
                 if store.trendErrors.contains(symbol) { Text("分时更新失败，可点击刷新重试").foregroundColor(.orange) }
             }.font(.system(size: 11)).padding(.top, 15)
-            TrendChart(series: store.minutes[symbol], quote: quote, detailed: true).frame(maxHeight: .infinity)
+            TrendChart(series: store.minutes[symbol], quote: quote, detailed: true, lineColor: isLeading ? .orange : nil).frame(maxHeight: .infinity)
             HStack { Text("09:30"); Spacer(); Text("11:30 / 13:00"); Spacer(); Text("15:00") }
                 .font(.system(size: 10)).foregroundColor(Palette.muted)
             HStack { Text("鼠标移到曲线上查看分时价格"); Spacer(); Text("虚线为昨收价") }
@@ -162,7 +172,8 @@ struct StockDetailPage: View {
         }
     }
     private func load(force: Bool = false) async {
-        if let period = store.detailPeriod.candlePeriod { await store.fetchCandles(symbol, period: period, adjustment: adjustment, force: force) }
+        if isLeading { await store.fetchLeading(force: force) }
+        else if let period = store.detailPeriod.candlePeriod { await store.fetchCandles(symbol, period: period, adjustment: adjustment, force: force) }
         else { await store.fetchMinutes(symbol, force: force) }
     }
     private static func formatTimestamp(_ text: String) -> String {

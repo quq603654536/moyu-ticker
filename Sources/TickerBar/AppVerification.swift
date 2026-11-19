@@ -25,6 +25,8 @@ import MarketCore
             try check(tracker.responds(to: NSSelectorFromString("mouseEntered:")) && tracker.responds(to: NSSelectorFromString("mouseExited:")), "Native hover selectors are registered correctly")
             await store.refresh()
             try check(store.error == nil, "Live quote refresh: \(store.error ?? "")")
+            try check(!MarketStore.indices.contains("sh000300") && MarketStore.indices[1] == MarketStore.leadingSymbol, "Replace CSI 300 card with real leading indicator")
+            try check(store.leading?.series.points.isEmpty == false && store.leading?.quote.symbol == MarketStore.leadingSymbol, "Live Eastmoney leading curve available")
             try check(store.quotes.count >= 17, "All initial indices and watchlist quotes")
             try check(store.visibleItems.count == 7, "Initial value group has 7 rows")
             try check(store.minutes["sh601288"]?.matches(store.quotes["sh601288"]) == true, "Intraday chart has current-day points")
@@ -53,6 +55,17 @@ import MarketCore
             try check(samples > 0 && Double(transparentPixels) / Double(samples) > 0.5, "Transparent hover background has real alpha, not faded text")
             store.hoverPinned = false
             store.hoverTransparent = false
+            store.openDetails(MarketStore.leadingSymbol)
+            try await snapshot(root, width: 1240, height: 800, file: directory.appendingPathComponent("leading-detail.png"))
+            let starQuotes = try await MarketService(log: log).quotes(["sh688041"])
+            guard let starQuote = starQuotes.first else { throw Failure(description: "Live STAR quote") }
+            store.quotes[starQuote.symbol] = starQuote
+            store.openDetails(starQuote.symbol)
+            await store.fetchMinutes(starQuote.symbol, force: true)
+            guard let starTrend = store.minutes[starQuote.symbol], let average = starTrend.points.last?.average else { throw Failure(description: "Live STAR intraday average") }
+            try check(starQuote.kind == "GP-A-KCB" && average >= starQuote.low * 0.99 && average <= starQuote.high * 1.01, "STAR average uses shares and stays in the trading range")
+            try await snapshot(root, width: 1240, height: 800, file: directory.appendingPathComponent("detail-star.png"))
+            store.selected = nil
             store.select("sh601288")
             try check(store.selected == "sh601288", "Row selection opens details")
             try await snapshot(root, width: 1240, height: 800, file: directory.appendingPathComponent("detail.png"))
@@ -115,8 +128,16 @@ import MarketCore
             try check(migrated.menuSymbols == ["sh000852"], "Legacy single selection migrates with index replacement")
             store.setMenuSymbol("sh601288", enabled: true)
             try await snapshot(MenuSelectionView(store: store), width: 300, height: 380, file: directory.appendingPathComponent("menu-selection.png"))
+            try check(restored.leading?.quote == store.leading?.quote, "Leading cache survives restart")
+            preferences.set(["sh000300"], forKey: "menuSymbols")
+            let replacedMenu = MarketStore(preferences: preferences)
+            try check(replacedMenu.menuSymbols == [MarketStore.leadingSymbol], "Existing CSI 300 menu selection migrates to the leading curve")
             try check(!restored.quotes.isEmpty && !restored.minutes.isEmpty, "Offline quote and trend cache survives reload")
             try check(!restored.candleSeries.isEmpty, "K-line cache survives reload for offline viewing")
+            preferences.removeObject(forKey: "marketDataSchema")
+            let repairedCache = MarketStore(preferences: preferences)
+            try check(repairedCache.minutes["sh601288"] == nil && repairedCache.quotes["sh601288"] == nil && repairedCache.candleSeries.isEmpty, "Invalidate old market data with incorrect volume units")
+            try check(repairedCache.items.map(\.symbol) == store.items.map(\.symbol) && repairedCache.items.first(where: { $0.symbol == "sh601288" })?.note == "长期观察" && repairedCache.menuSymbols == [MarketStore.leadingSymbol] && repairedCache.refreshInterval == 30, "Cache migration preserves watchlist and settings")
             store.sort = .manual
             store.move("sh601288", by: -1)
             try check(store.visibleItems[2].symbol == "sh601288", "Move watchlist row")
@@ -138,7 +159,7 @@ import MarketCore
             try await snapshot(root, width: 1240, height: 800, file: directory.appendingPathComponent("overview.png"))
             try await snapshot(SettingsView(store: store), width: 512, height: 610, file: directory.appendingPathComponent("settings.png"))
             try await snapshot(RequestDiagnosticsView(log: log), width: 570, height: 480, file: directory.appendingPathComponent("request-diagnostics.png"))
-            try "PASS: pinned/transparent hover, navigation, intraday and daily/weekly/monthly K-lines, adjustment, persistence; 15 rendered views; animated menu quote transitions\n".write(to: directory.appendingPathComponent("result.txt"), atomically: true, encoding: .utf8)
+            try "PASS: pinned/transparent hover, navigation, intraday and daily/weekly/monthly K-lines, adjustment, persistence; 16 rendered views including leading detail; animated menu quote transitions\n".write(to: directory.appendingPathComponent("result.txt"), atomically: true, encoding: .utf8)
             print("PASS: application integration and rendered previews at \(output)")
             NSApp.terminate(nil)
         } catch {
