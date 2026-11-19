@@ -48,6 +48,8 @@ public extension MarketParser {
         let key = stock[adjustedKey] is [[Any]] ? adjustedKey : period.rawValue
         guard let rows = stock[key] as? [[Any]] else { throw MarketError.noData }
         let actualAdjustment: PriceAdjustment = key.hasPrefix("qfq") ? .forward : .none
+        let snapshot = (stock["qt"] as? [String: Any])?[symbol] as? [String]
+        let volumeScale = tencentVolumeScale(symbol: symbol, kind: tencentKind(snapshot))
         var unique: [String: CandleBar] = [:]
         for row in rows {
             guard row.count >= 6, let date = row[0] as? String,
@@ -60,7 +62,7 @@ public extension MarketParser {
                   let volume = number(5), volume >= 0, high >= max(open, close), low <= min(open, close) else { continue }
             // Forward adjustment can legitimately make old prices negative after
             // accumulated cash dividends. Preserve those candles and their dates.
-            unique[date] = CandleBar(date: date, open: open, close: close, high: high, low: low, volume: volume * 100)
+            unique[date] = CandleBar(date: date, open: open, close: close, high: high, low: low, volume: volume * volumeScale)
         }
         let bars = unique.values.sorted { $0.date < $1.date }
         guard !bars.isEmpty else { throw MarketError.noData }

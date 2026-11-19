@@ -80,6 +80,19 @@ public enum MarketError: LocalizedError {
 }
 
 public enum MarketParser {
+    static func tencentKind(_ fields: [String]?) -> String {
+        fields?.dropFirst(51).first {
+            $0 == "GP-A" || $0.hasPrefix("GP-A-") || ["ETF", "LOF", "ZS", "FUND"].contains($0)
+        } ?? ""
+    }
+
+    // Tencent reports STAR Market volume in shares (including 689 CDRs),
+    // while the other supported mainland securities use lots of 100 shares.
+    // This convention applies to quotes, minute totals and K-line volume.
+    static func tencentVolumeScale(symbol: String, kind: String) -> Double {
+        kind == "GP-A-KCB" || symbol.hasPrefix("sh688") || symbol.hasPrefix("sh689") ? 1 : 100
+    }
+
     public static func decode(_ data: Data) throws -> String {
         let encoding = CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue))
         guard let text = String(data: data, encoding: String.Encoding(rawValue: encoding)) ?? String(data: data, encoding: .utf8) else { throw MarketError.invalidResponse }
@@ -99,11 +112,11 @@ public enum MarketParser {
             func number(_ i: Int) -> Double? { i < fields.count ? Double(fields[i]) : nil }
             // Extended performance fields follow the security-type marker, rather
             // than a guessed fixed offset (A shares / ETFs / indices may differ).
-            let marker = fields.indices.first { $0 > 50 && ["GP-A", "ETF", "LOF", "ZS", "FUND"].contains(fields[$0]) }
-            let kind = marker.map { fields[$0] } ?? ""
+            let kind = tencentKind(fields)
+            let marker = fields.indices.first { $0 > 50 && !kind.isEmpty && fields[$0] == kind }
             return Quote(symbol: symbol, name: fields[1], code: fields[2], price: price, previousClose: previous,
                          open: number(5) ?? 0, high: number(33) ?? 0, low: number(34) ?? 0,
-                         change: change, percent: percent, volume: (number(36) ?? 0) * 100,
+                         change: change, percent: percent, volume: (number(36) ?? 0) * tencentVolumeScale(symbol: symbol, kind: kind),
                          amount: (number(37) ?? 0) * 10_000,
                          marketCap: number(45).flatMap { $0 > 0 ? $0 * 100_000_000 : nil },
                          turnover: number(38), pe: number(39), ytd: marker.flatMap { number($0 + 1) },
@@ -132,15 +145,23 @@ public enum MarketParser {
               let detail = stock["data"] as? [String: Any], let rows = detail["data"] as? [String],
               let date = detail["date"] as? String, date.count == 8 else { throw MarketError.noData }
         let snapshot = (stock["qt"] as? [String: Any])?[symbol] as? [String]
-        let isIndex = snapshot?.contains("ZS") == true || symbol.hasPrefix("sh000") || symbol.hasPrefix("sz399")
+        let kind = tencentKind(snapshot)
+        let isIndex = kind == "ZS" || symbol.hasPrefix("sh000") || symbol.hasPrefix("sz399")
+        let volumeScale = tencentVolumeScale(symbol: symbol, kind: kind)
         let points: [MinutePoint] = rows.compactMap { row in
             let f = row.split(separator: " ")
-            guard f.count >= 2, f[0].count == 4, let price = Double(f[1]), price > 0 else { return nil }
+            guard f.count >= 2, f[0].count == 4, let price = Double(f[1]), price.isFinite, price > 0 else { return nil }
             let volume = f.count > 2 ? Double(f[2]) : nil
             let amount = f.count > 3 ? Double(f[3]) : nil
             // An index is not itself traded: aggregate turnover / shares is not
             // its index-level average and would flatten the price chart.
-            let average: Double? = isIndex ? nil : volume.flatMap { v in amount.flatMap { a in v > 0 ? a / (v * 100) : nil } }
+            let average: Double? = isIndex ? nil : volume.flatMap { v in
+                amount.flatMap { a in
+                    guard v.isFinite, v > 0, a.isFinite, a > 0 else { return nil }
+                    let value = a / (v * volumeScale)
+                    return value.isFinite && value > 0 ? value : nil
+                }
+            }
             return MinutePoint(time: String(f[0]), price: price, average: average)
         }
         guard !points.isEmpty else { throw MarketError.noData }
