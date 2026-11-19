@@ -48,6 +48,48 @@ private func validate(fixtures: URL) throws {
     let indexJSON = Data(#"{"data":{"sh000001":{"data":{"date":"20261117","data":["0930 3580.00 100000 10000000.00"]}}}}"#.utf8)
     let indexSeries = try MarketParser.minutes(indexJSON, symbol: "sh000001")
     try require(indexSeries.points[0].average == nil, "Index turnover must not create a fake VWAP or flatten chart")
+    // Provider recordings from the reported HaiGuang regression (2026-11-19).
+    func recordedQuote(_ file: String, _ symbol: String) throws -> Quote {
+        let root = try JSONSerialization.jsonObject(with: data(file)) as! [String: Any]
+        let stock = (root["data"] as! [String: Any])[symbol] as! [String: Any]
+        let fields = (stock["qt"] as! [String: Any])[symbol] as! [String]
+        return try MarketParser.quotes("v_\(symbol)=\"" + fields.joined(separator: "~") + "\";").first.unwrap("Recorded quote missing")
+    }
+    let starQuote = try recordedQuote("minute-star.json", "sh688041")
+    let starMinute = try MarketParser.minutes(data("minute-star.json"), symbol: "sh688041")
+    try require(starQuote.kind == "GP-A-KCB" && starQuote.ytd == -24.80, "Recognize STAR security marker and performance fields")
+    try require(starQuote.volume == 40_904_667, "STAR quote volume is already shares, not lots")
+    try require(starMinute.points.first?.average == 185, "STAR opening VWAP is 185 yuan, never 1.85")
+    try require(abs((starMinute.points.last?.average ?? 0) - 6_735_871_987.0 / 40_904_667) < 0.000001, "STAR cumulative amount / shares gives real VWAP")
+    try require(starMinute.points.allSatisfy { ($0.average ?? 0) >= starQuote.low && ($0.average ?? 0) <= starQuote.high }, "Recorded STAR averages stay inside the actual trading range")
+    let starCandle = try MarketParser.candles(data("kline-star.json"), symbol: "sh688041", period: .day, adjustment: .forward)
+    try require(starCandle.bars.last?.volume == 40_942_317, "STAR K-line volume is already shares")
+    let cdrCandle = try MarketParser.candles(data("kline-star-cdr.json"), symbol: "sh689009", period: .day, adjustment: .forward)
+    try require(cdrCandle.bars.last?.volume == 6_096_941, "STAR CDR volume follows share units too")
+    let chinextQuote = try recordedQuote("minute-chinext.json", "sz300750")
+    let chinextMinute = try MarketParser.minutes(data("minute-chinext.json"), symbol: "sz300750")
+    try require(chinextQuote.kind == "GP-A-CYB" && chinextQuote.ytd == -34.46, "Recognize ChiNext subtype without treating it as STAR")
+    try require(chinextQuote.volume == 23_904_600, "ChiNext remains lots converted to shares")
+    try require(abs((chinextMinute.points.first?.average ?? 0) - 239.93) < 0.001, "ChiNext VWAP keeps the lot conversion")
+    let etfMinuteJSON = Data(#"{"data":{"sh588010":{"data":{"date":"20261119","data":["0930 0.741 79 5854"]}}}}"#.utf8)
+    let etfMinute = try MarketParser.minutes(etfMinuteJSON, symbol: "sh588010")
+    try require(abs((etfMinute.points[0].average ?? 0) - 5854.0 / 7900) < 0.000001, "ETF VWAP keeps the lot conversion")
+    let noMetadataJSON = Data(#"{"data":{"sh688041":{"data":{"date":"20261119","data":["0930 185 258304 47786240","0931 185 0 0","0932 185 nan 100","0933 185 100 inf"]}}}}"#.utf8)
+    let noMetadata = try MarketParser.minutes(noMetadataJSON, symbol: "sh688041")
+    try require(noMetadata.points[0].average == 185, "STAR symbol determines units even if quote metadata is absent")
+    try require(noMetadata.points.dropFirst().allSatisfy { $0.average == nil }, "Invalid totals cannot create a zero or nonfinite average line")
+    let yellowJSON = Data(#"{"rc":0,"data":{"code":"000001","market":1,"prePrice":3500,"trends":["2026-11-18 09:30,3500,3501,3502,3499,100,10000,3490.500","2026-11-18 09:31,3520,3521,3522,3510,100,10000,3478.000"]}}"#.utf8)
+    let yellow = try MarketParser.leadingIndex(yellowJSON)
+    try require(yellow.quote.symbol == LeadingIndex.symbol && yellow.quote.price == 3478, "Yellow curve uses f58, never the blue close or turnover/volume")
+    try require(abs(yellow.quote.percent - (3478.0 / 3500 - 1) * 100) < 0.000001, "Yellow change uses provider's chart baseline")
+    try require(yellow.quote.change == -22 && yellow.series.points[0].price == 3490.5, "Preserve yellow point levels and change")
+    try require(yellow.quote.timestamp == "20261118093100" && yellow.series.matches(yellow.quote), "Yellow quote and minutes share the source trading date")
+    try require(yellow.series.points.allSatisfy { $0.average == nil }, "Do not mislabel the leading curve as stock VWAP")
+    let badYellow = Data(#"{"rc":0,"data":{"code":"000001","market":1,"prePrice":3500,"trends":["2026-11-18 09:30,3500,3501,3502,3499,100,10000,0","2026-11-18 09:31,3520,3521,3522,3510,100,10000,--"]}}"#.utf8)
+    do { _ = try MarketParser.leadingIndex(badYellow); throw CheckFailure(description: "Must reject unavailable yellow data") }
+    catch is MarketError {}
+    let cachedYellow = try JSONDecoder().decode(LeadingIndexSnapshot.self, from: JSONEncoder().encode(yellow))
+    try require(cachedYellow.quote == yellow.quote && cachedYellow.series == yellow.series, "Yellow quote and series survive cache round trip")
     let breadth = try MarketParser.breadth(data("breadth.json"))
     try require(breadth.up == 1769 && breadth.down == 3317 && breadth.flat == 208, "Combine Shanghai/Shenzhen breadth")
     try require(breadth.amount > 700_000_000_000, "Breadth amount remains in yuan")

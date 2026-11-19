@@ -64,6 +64,13 @@ private final class Stub: URLProtocol {
         snapshot = await log.snapshot()
         try check(row(snapshot, scope: "operation", name: "报价")?.total == 3, "Cancellation excluded from denominator")
         try check(row(snapshot, scope: "operation", name: "报价")?.failures == 2, "Empty and partial payloads count as final failures")
+        let leadingJSON = Data(#"{"rc":0,"data":{"code":"000001","market":1,"preClose":3500,"trends":["2026-11-18 09:30,3500,3501,3502,3499,100,10000,3490.5"]}}"#.utf8)
+        Stub.replies = [.data(200, Data("invalid".utf8)), .data(200, leadingJSON)]
+        let leading = try await service.leadingIndex()
+        try check(leading.delayed && leading.quote.price == 3490.5, "Leading curve recovers through delayed host with provenance")
+        Stub.replies = [.error(URLError(.cancelled))]
+        do { _ = try await service.leadingIndex(); throw Failure.check("Expected leading cancellation") }
+        catch let error as URLError { try check(error.code == .cancelled, "Leading cancellation does not try fallback") }
         let reloaded = await RequestLog(directory: directory).snapshot()
         try check(row(reloaded, scope: "operation", name: "报价")?.total == 3, "Statistics survive restart")
         let text = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
